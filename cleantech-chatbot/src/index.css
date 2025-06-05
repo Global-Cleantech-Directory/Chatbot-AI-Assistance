@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gray-50;
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+@layer components {
+  .chat-container {
+    @apply max-w-4xl mx-auto p-4;
+  }
+  
+  .chat-message {
+    @apply p-4 rounded-lg mb-4 max-w-[80%];
+  }
+  
+  .user-message {
+    @apply bg-primary text-white ml-auto;
+  }
+  
+  .bot-message {
+    @apply bg-gray-200 text-gray-800;
+  }
+  
+  .chat-input {
+    @apply w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent;
+  }
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
