@@ -1,9 +1,16 @@
 require('dotenv').config();
+const connectDB = require('./lib/db');
 const express = require('express');
 const cors = require('cors');
 const LanguageDetect = require('languagedetect');
 const lngDetector = new LanguageDetect();
+const Message = require('./models/Message');
+const Lead = require('./models/Lead');
 const { Translate } = require('@google-cloud/translate').v2;
+
+// Add email functionality imports
+const { scheduleFollowUpEmails, cancelFollowUpEmails } = require('./lib/emailScheduler');
+const EmailSchedule = require('./models/EmailSchedule');
 
 const app = express();
 const port = process.env.PORT || 5003;
@@ -12,6 +19,33 @@ const port = process.env.PORT || 5003;
 const translate = new Translate({
   key: process.env.GOOGLE_TRANSLATE_API_KEY
 });
+
+// Helper function for translation
+async function translateText(text, targetLanguage) {
+  try {
+    // Map language detector output to Google Translate language codes
+    const languageMap = {
+      'english': 'en',
+      'french': 'fr',
+      'spanish': 'es',
+      'german': 'de',
+      'italian': 'it',
+      'portuguese': 'pt',
+      'dutch': 'nl',
+      'russian': 'ru',
+      'japanese': 'ja',
+      'chinese': 'zh',
+      'korean': 'ko'
+    };
+
+    const targetLang = languageMap[targetLanguage.toLowerCase()] || targetLanguage;
+    const [translation] = await translate.translate(text, targetLang);
+    return translation;
+  } catch (error) {
+    console.error('Translation error:', error);
+    return text; // Return original text if translation fails
+  }
+}
 
 app.use(cors());
 app.use(express.json());
@@ -76,122 +110,355 @@ app.get('/', (req, res) => {
   res.json({ message: 'Welcome to the Global Cleantech Directory API' });
 })
 
+app.get('/api/chat', async (req, res) => {
+  try {
+    // Get all messages sorted by timestamp
+    const messages = await Message.find({}).sort({ timestamp: 1 });
+    res.json(messages);
+  } catch (error) {
+    console.error('Error fetching messages:', error);
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
 app.post('/api/chat', async (req, res) => {
-  const { message, language } = req.body;
-
-  // Keyword-based language override
-  const keywordLangMap = {
-    namaste: 'hi',
-    vanakkam: 'ta',
-    hola: 'es',
-    bonjour: 'fr',
-    hallo: 'de',
-    ciao: 'it',
-    salut: 'fr',
-    hej: 'sv',
-    aloha: 'haw',
-    salam: 'ar',
-    merhaba: 'tr',
-    olá: 'pt',
-    privet: 'ru',
-    konnichiwa: 'ja',
-    annyeong: 'ko',
-    xinchao: 'vi',
-    sawasdee: 'th',
-    shalom: 'he',
-    nihao: 'zh',
-    czesc: 'pl',
-    tere: 'et',
-    zdravo: 'hr',
-    ahoj: 'cs',
-    selamat: 'id',
-    mabuhay: 'tl',
-    jambo: 'sw',
-    marhaba: 'ar',
-    szia: 'hu',
-    kumusta: 'tl',
-    sawubona: 'zu',
-    jambo: 'sw',
-    goddag: 'da',
-    hei: 'fi',
-    sveiki: 'lv',
-    labas: 'lt',
-    bok: 'hr',
-    zdravei: 'bg',
-    zdravo: 'sr',
-    ahoj: 'sk',
-    hallo: 'nl',
-    servus: 'de',
-    tere: 'et',
-    hei: 'no',
-    hei: 'fi',
-    hei: 'sv',
-    hei: 'da',
-    hei: 'is',
-    hei: 'fo',
-    hei: 'kl',
-    hei: 'sm',
-    hei: 'to',
-    hei: 'ty',
-    hei: 'mi',
-    hei: 'mg',
-    hei: 'rn',
-    hei: 'rw',
-    hei: 'so',
-    hei: 'ss',
-    hei: 'st',
-    hei: 'tn',
-    hei: 'ts',
-    hei: 've',
-    hei: 'xh',
-    hei: 'zu',
-  };
-
-  let detectedLangCode = 'en';
-  let detectedLanguage = 'english';
-
-  // Check for keyword override
-  const msgLower = message.trim().toLowerCase();
-  if (keywordLangMap[msgLower]) {
-    detectedLangCode = keywordLangMap[msgLower];
-  } else if (!language || language === 'auto') {
-    // Use Google Translate's detect method
-    const [detection] = await translate.detect(message);
-    detectedLangCode = Array.isArray(detection) ? detection[0].language : detection.language;
-  } else {
-    detectedLangCode = language;
+  const { message, sessionId } = req.body;
+  
+  if (!sessionId) {
+    return res.status(400).json({ error: 'Session ID is required' });
   }
 
-  // Map language code to language name
-  const codeToLang = {
-    en: 'english', fr: 'french', hi: 'hindi', es: 'spanish', de: 'german', zh: 'chinese', ja: 'japanese', ko: 'korean', ru: 'russian', pt: 'portuguese', it: 'italian', nl: 'dutch'
-  };
-  detectedLanguage = codeToLang[detectedLangCode] || detectedLangCode;
-
-  const cannedResponse = "Hello! I'm your Cleantech Directory assistant. How can I help you today?";
-
   try {
-    if (detectedLangCode === 'en') {
-      res.json({
-        response: cannedResponse,
-        detectedLanguage
-      });
-    } else {
-      const [translation] = await translate.translate(cannedResponse, detectedLangCode);
-      res.json({
-        response: translation,
-        detectedLanguage
-      });
+    // Find or create lead
+    let lead = await Lead.findOne({ sessionId });
+    if (!lead) {
+      lead = new Lead({ sessionId });
     }
+
+    // Analyze intent and update lead
+    const intentAnalysis = lead.analyzeIntent(message);
+    await lead.save();
+
+    // Enhanced language detection for ALL languages
+    let detectedLanguage = 'english';
+    let targetLang = 'en';
+    
+    // Check for specific language patterns first (more reliable for non-Latin scripts)
+    if (message.match(/[가-힣]/)) {
+      // Korean characters
+      detectedLanguage = 'korean';
+      targetLang = 'ko';
+    } else if (message.match(/[\u3040-\u309F]/)) {
+      // Japanese hiragana
+      detectedLanguage = 'japanese';
+      targetLang = 'ja';
+    } else if (message.match(/[\u30A0-\u30FF]/)) {
+      // Japanese katakana
+      detectedLanguage = 'japanese';
+      targetLang = 'ja';
+    } else if (message.match(/[\u4E00-\u9FAF]/)) {
+      // Chinese characters (CJK Unified Ideographs)
+      detectedLanguage = 'chinese';
+      targetLang = 'zh';
+    } else if (message.match(/[\u0900-\u097F]/)) {
+      // Hindi/Devanagari
+      detectedLanguage = 'hindi';
+      targetLang = 'hi';
+    } else if (message.match(/[\u0980-\u09FF]/)) {
+      // Bengali
+      detectedLanguage = 'bengali';
+      targetLang = 'bn';
+    } else if (message.match(/[\u0A00-\u0A7F]/)) {
+      // Gujarati
+      detectedLanguage = 'gujarati';
+      targetLang = 'gu';
+    } else if (message.match(/[\u0A80-\u0AFF]/)) {
+      // Punjabi
+      detectedLanguage = 'punjabi';
+      targetLang = 'pa';
+    } else if (message.match(/[\u0B00-\u0B7F]/)) {
+      // Tamil
+      detectedLanguage = 'tamil';
+      targetLang = 'ta';
+    } else if (message.match(/[\u0C00-\u0C7F]/)) {
+      // Telugu
+      detectedLanguage = 'telugu';
+      targetLang = 'te';
+    } else if (message.match(/[\u0600-\u06FF]/)) {
+      // Arabic
+      detectedLanguage = 'arabic';
+      targetLang = 'ar';
+    } else if (message.match(/[\u0590-\u05FF]/)) {
+      // Hebrew
+      detectedLanguage = 'hebrew';
+      targetLang = 'he';
+    } else if (message.match(/[\u0400-\u04FF]/)) {
+      // Cyrillic (Russian, Ukrainian, Bulgarian, etc.)
+      detectedLanguage = 'russian';
+      targetLang = 'ru';
+    } else if (message.match(/[\u0370-\u03FF]/)) {
+      // Greek
+      detectedLanguage = 'greek';
+      targetLang = 'el';
+    } else if (message.match(/[\u0E00-\u0E7F]/)) {
+      // Thai
+      detectedLanguage = 'thai';
+      targetLang = 'th';
+    } else if (message.match(/[\u1000-\u109F]/)) {
+      // Myanmar/Burmese
+      detectedLanguage = 'burmese';
+      targetLang = 'my';
+    } else if (message.match(/[\u1780-\u17FF]/)) {
+      // Khmer/Cambodian
+      detectedLanguage = 'khmer';
+      targetLang = 'km';
+    } else if (message.match(/[\u0E80-\u0EFF]/)) {
+      // Lao
+      detectedLanguage = 'lao';
+      targetLang = 'lo';
+    } else {
+      // Fall back to languagedetect for Latin scripts (English, French, Spanish, etc.)
+      const detectedLanguages = lngDetector.detect(message);
+      if (detectedLanguages.length > 0) {
+        detectedLanguage = detectedLanguages[0][0].toLowerCase();
+        const languageMap = {
+          'english': 'en',
+          'french': 'fr',
+          'spanish': 'es',
+          'german': 'de',
+          'italian': 'it',
+          'portuguese': 'pt',
+          'dutch': 'nl',
+          'russian': 'ru',
+          'japanese': 'ja',
+          'chinese': 'zh',
+          'korean': 'ko',
+          'hindi': 'hi',
+          'arabic': 'ar',
+          'hebrew': 'he',
+          'greek': 'el',
+          'thai': 'th',
+          'vietnamese': 'vi',
+          'turkish': 'tr',
+          'polish': 'pl',
+          'czech': 'cs',
+          'hungarian': 'hu',
+          'finnish': 'fi',
+          'swedish': 'sv',
+          'norwegian': 'no',
+          'danish': 'da'
+        };
+        targetLang = languageMap[detectedLanguage] || detectedLanguage;
+      }
+    }
+
+    // Always start with English response
+    let response;
+    const messageLower = message.toLowerCase();
+    
+    if (messageLower.includes('hello') || messageLower.includes('hi') || 
+        messageLower.includes('bonjour') || messageLower.includes('hola') || 
+        messageLower.includes('ciao') || messageLower.includes('hallo') ||
+        message.includes('안녕하세요') || message.includes('नमस्ते') ||
+        message.includes('こんにちは') || message.includes('你好') ||
+        message.includes('مرحبا') || message.includes('שלום') ||
+        message.includes('Γεια σας') || message.includes('สวัสดี')) {
+      response = responses.greeting.en;
+    } else if (messageLower.includes('cleantech') || messageLower.includes('clean tech')) {
+      response = responses.cleantech.en;
+    } else if (messageLower.includes('company') || messageLower.includes('companies')) {
+      response = responses.companies.en;
+    } else {
+      response = responses.default.en;
+    }
+
+    // Always translate to detected language if not English
+    if (targetLang !== 'en') {
+      response = await translateText(response, targetLang);
+    }
+
+    // Store messages
+    const userMessage = await Message.create({
+      message: message,
+      isBot: false,
+      language: detectedLanguage,
+      leadScore: intentAnalysis.score
+    });
+
+    const botMessage = await Message.create({
+      message: response,
+      isBot: true,
+      language: detectedLanguage
+    });
+
+    // Check if we should prompt for membership
+    let membershipPrompt = null;
+    if (!lead.membershipPrompted && 
+        (lead.status === 'interested' || lead.status === 'high_intent')) {
+      membershipPrompt = {
+        type: 'membership_prompt',
+        message: "I notice you're interested in our services! Would you like to create a free account to access more features and connect with cleantech companies?",
+        cta: {
+          text: "Join Free",
+          url: "/signup"
+        }
+      };
+      lead.membershipPrompted = true;
+      await lead.save();
+    }
+
+    // Add delay for natural feel
+    setTimeout(() => {
+      res.json({ 
+        response,
+        messageId: botMessage._id,
+        detectedLanguage,
+        membershipPrompt,
+        leadStatus: lead.status,
+        intentScore: lead.intentScore
+      });
+    }, 500);
+
   } catch (error) {
-    console.error('Google Translate error:', error.response?.data || error.message);
-    res.status(500).json({
-      response: "Sorry, I'm having trouble connecting to the translation service.",
-      detectedLanguage
+    console.error('Error:', error);
+    res.status(500).json({ 
+      error: 'Failed to process message',
+      response: response 
     });
   }
 });
 
+app.post("/api/location", async (req, res) => {
+  const { sessionId, location } = req.body;
+
+  if (!sessionId || !location) {
+    return res.status(400).json({ error: 'Session ID and location are required' });
+  }
+
+  try {
+    const lead = await Lead.findOne({ sessionId });
+    
+    if (!lead) {
+      return res.status(404).json({ 
+        error: 'Lead not found for this session ID' 
+      });
+    }
+
+    // Update lead with location
+    lead.location = location;
+    await lead.save();
+
+    res.json({ 
+      message: 'Location updated successfully',
+      coordinates: lead.location.coordinates
+    });
+  } catch (error) {
+    console.error('Error updating location:', error);
+    res.status(500).json({ error: 'Failed to update location' });
+  }
+});
+
+// Email signup endpoint
+app.post('/api/email-signup', async (req, res) => {
+  const { email, sessionId } = req.body;
+
+  if (!email || !sessionId) {
+    return res.status(400).json({ error: 'Email and session ID are required' });
+  }
+
+  // Basic email validation
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+
+  try {
+    // Find the lead
+    const lead = await Lead.findOne({ sessionId });
+    
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    // Update lead with email
+    lead.email = email;
+    lead.lastInteraction = new Date();
+    await lead.save();
+
+    // Schedule follow-up emails if not already scheduled
+    if (!lead.emailFollowupScheduled) {
+      const scheduledEmails = await scheduleFollowUpEmails(lead._id, email);
+      console.log(`📧 Scheduled follow-up emails for ${email}:`, scheduledEmails);
+    }
+
+    res.json({ 
+      message: 'Email saved and follow-ups scheduled successfully',
+      leadStatus: lead.status,
+      intentScore: lead.intentScore,
+      emailScheduled: !lead.emailFollowupScheduled
+    });
+  } catch (error) {
+    console.error('Error saving email:', error);
+    res.status(500).json({ error: 'Failed to save email' });
+  }
+});
+
+// Get email schedule status
+app.get('/api/email-schedule/:sessionId', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    const lead = await Lead.findOne({ sessionId });
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    const schedules = await EmailSchedule.find({ leadId: lead._id }).sort({ scheduledFor: 1 });
+    
+    res.json({
+      hasEmail: !!lead.email,
+      email: lead.email,
+      followupScheduled: lead.emailFollowupScheduled,
+      schedules: schedules.map(s => ({
+        type: s.scheduleType,
+        scheduledFor: s.scheduledFor,
+        sent: s.sent,
+        sentAt: s.sentAt
+      }))
+    });
+  } catch (error) {
+    console.error('Error getting email schedule:', error);
+    res.status(500).json({ error: 'Failed to get email schedule' });
+  }
+});
+
+// Cancel follow-up emails
+app.post('/api/cancel-emails/:sessionId', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    const lead = await Lead.findOne({ sessionId });
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+
+    const result = await cancelFollowUpEmails(lead._id);
+    
+    res.json({ 
+      message: 'Follow-up emails cancelled successfully',
+      cancelledCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error('Error cancelling emails:', error);
+    res.status(500).json({ error: 'Failed to cancel emails' });
+  }
+});
+
+// Start email processor
+require('./lib/emailProcessor');
+
 app.listen(port, () => {
+  // Call the connect function
+  connectDB();
   console.log(`Server is running on port http://localhost:${port}`);
 });

@@ -15,10 +15,12 @@
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^4.18.2",
+    "form-data": "^4.0.4",
     "langdetect": "^0.2.1",
     "languagedetect": "^2.0.0",
+    "mailgun.js": "^12.0.3",
     "mongoose": "^8.15.1",
-    "node-cron": "^4.1.1",
+    "node-cron": "^4.2.1",
     "nodemailer": "^7.0.3"
   },
   "devDependencies": {

@@ -34,7 +34,7 @@ const leadSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    required: true
+    // required: true
   },
   emailFollowups: {
     threeDay: {
@@ -49,6 +49,10 @@ const leadSchema = new mongoose.Schema({
       sent: { type: Boolean, default: false },
       scheduledFor: Date
     }
+  },
+  emailFollowupScheduled: {
+    type: Boolean,
+    default: false
   },
   location: {
     type: {
