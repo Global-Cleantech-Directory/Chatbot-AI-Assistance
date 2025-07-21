@@ -1,5 +1,6 @@
 const formData = require('form-data');
 const Mailgun = require('mailgun.js');
+const AssistantMemoryService = require('./assistantMemory');
 
 const mailgun = new Mailgun(formData);
 const mg = mailgun.client({
@@ -86,12 +87,45 @@ async function sendEmail(to, templateType, leadData = {}) {
     throw new Error(`Template ${templateType} not found`);
   }
 
+  // Get personalized content from conversation memory
+  let personalizedContext = null;
+  if (leadData.sessionId) {
+    try {
+      personalizedContext = await AssistantMemoryService.generateEmailContext(leadData.sessionId, templateType);
+    } catch (error) {
+      console.log('Could not get personalized context, using default template:', error.message);
+    }
+  }
+
+  // Create personalized email content
+  let subject = template.subject;
+  let htmlContent = template.html;
+  
+  if (personalizedContext) {
+    // Personalize the subject line
+    if (personalizedContext.interests && personalizedContext.interests.length > 0) {
+      const mainInterest = personalizedContext.interests[0];
+      subject = subject.replace('Cleantech Directory', `${mainInterest.charAt(0).toUpperCase() + mainInterest.slice(1)} Solutions`);
+    }
+    
+    // Insert personalized content into the template
+    htmlContent = htmlContent.replace(
+      '<p>We noticed you were exploring',
+      `<p>${personalizedContext.personalizedContent}</p><p>We noticed you were exploring`
+    );
+    
+    // Update greeting if we know their role
+    if (personalizedContext.role) {
+      htmlContent = htmlContent.replace('Hi there!', `Hello ${personalizedContext.role}!`);
+    }
+  }
+
   const messageData = {
     from: 'Cleantech Directory <noreply@calvin.mydomain.com>',
     to: to,
-    subject: template.subject,
-    html: template.html,
-    text: template.html.replace(/<[^>]*>/g, '') // Strip HTML for text version
+    subject: subject,
+    html: htmlContent,
+    text: htmlContent.replace(/<[^>]*>/g, '') // Strip HTML for text version
   };
 
   try {
@@ -104,4 +138,47 @@ async function sendEmail(to, templateType, leadData = {}) {
   }
 }
 
-module.exports = { sendEmail };
+// Function to create personalized email templates
+function createPersonalizedTemplate(templateType, context) {
+  const baseTemplate = emailTemplates[templateType];
+  
+  if (!context) return baseTemplate;
+  
+  let personalizedHtml = baseTemplate.html;
+  
+  // Replace placeholders with personalized content
+  if (context.interests) {
+    const interestList = context.interests.map(interest => 
+      `<li>${interest.charAt(0).toUpperCase() + interest.slice(1)} solutions</li>`
+    ).join('');
+    
+    personalizedHtml = personalizedHtml.replace(
+      '<li>Renewable energy companies</li>',
+      interestList || '<li>Renewable energy companies</li>'
+    );
+  }
+  
+  // Add personalized recommendations if available
+  if (context.recommendations && context.recommendations.length > 0) {
+    const recommendationSection = `
+      <div style="background: #f5f5f5; padding: 15px; margin: 20px 0; border-radius: 5px;">
+        <h3 style="color: #333; margin-top: 0;">Recommended for You:</h3>
+        <ul>
+          ${context.recommendations.map(rec => `<li>${rec}</li>`).join('')}
+        </ul>
+      </div>
+    `;
+    
+    personalizedHtml = personalizedHtml.replace(
+      '<div style="text-align: center; margin: 30px 0;">',
+      recommendationSection + '<div style="text-align: center; margin: 30px 0;">'
+    );
+  }
+  
+  return {
+    subject: baseTemplate.subject,
+    html: personalizedHtml
+  };
+}
+
+module.exports = { sendEmail, createPersonalizedTemplate };

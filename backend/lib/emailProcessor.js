@@ -51,7 +51,10 @@ cron.schedule('0 * * * *', async () => {
         await sendEmail(
           emailSchedule.email,
           emailSchedule.scheduleType,
-          emailSchedule.leadId
+          {
+            ...emailSchedule.leadId.toObject(),
+            sessionId: emailSchedule.leadId.sessionId
+          }
         );
 
         // Mark as sent
