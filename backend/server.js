@@ -13,6 +13,10 @@ const { GoogleGenAI } = require('@google/genai');  // Gemini AI
 const { scheduleFollowUpEmails, cancelFollowUpEmails } = require('./lib/emailScheduler');
 const EmailSchedule = require('./models/EmailSchedule');
 
+// Add assistant memory imports
+const AssistantMemoryService = require('./lib/assistantMemory');
+const ConversationMemory = require('./models/ConversationMemory');
+
 const app = express();
 const port = process.env.PORT || 5003;
 
@@ -134,6 +138,26 @@ app.post('/api/chat', async (req, res) => {
       isBot: true,
       language: detectedLanguage
     });
+
+    // Update assistant memory with conversation context
+    try {
+      const messageAnalysis = AssistantMemoryService.analyzeMessage(message, 'user');
+      await AssistantMemoryService.updateConversationMemory(sessionId, {
+        message: message,
+        sender: 'user'
+      }, messageAnalysis);
+      
+      // Also store the bot response
+      await AssistantMemoryService.updateConversationMemory(sessionId, {
+        message: response,
+        sender: 'assistant'
+      }, { language: detectedLanguage });
+      
+      console.log('✅ Assistant memory updated for session:', sessionId);
+    } catch (memoryError) {
+      console.log('⚠️  Could not update assistant memory:', memoryError.message);
+      // Don't fail the request if memory update fails
+    }
 
     res.json({ response, messageId: botMessage._id, detectedLanguage });
   } catch (error) {
@@ -280,6 +304,61 @@ app.post('/api/cancel-emails/:sessionId', async (req, res) => {
   } catch (error) {
     console.error('Error cancelling emails:', error);
     res.status(500).json({ error: 'Failed to cancel emails' });
+  }
+});
+
+// Assistant Memory API endpoints
+
+// Get conversation memory for a session
+app.get('/api/memory/:sessionId', async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    const memory = await ConversationMemory.findOne({ sessionId }).populate('leadId');
+    
+    if (!memory) {
+      return res.status(404).json({ error: 'Conversation memory not found' });
+    }
+
+    res.json({
+      sessionId: memory.sessionId,
+      context: memory.context,
+      analysis: memory.analysis,
+      followUpContext: memory.followUpContext,
+      messageCount: memory.rawMessages.length,
+      lastActivity: memory.context.engagement.lastActiveAt,
+      emailPersonalization: memory.getEmailPersonalization()
+    });
+  } catch (error) {
+    console.error('Error getting conversation memory:', error);
+    res.status(500).json({ error: 'Failed to get conversation memory' });
+  }
+});
+
+// Generate personalized email preview
+app.get('/api/email-preview/:sessionId/:emailType', async (req, res) => {
+  const { sessionId, emailType } = req.params;
+
+  try {
+    const emailContext = await AssistantMemoryService.generateEmailContext(sessionId, emailType);
+    
+    if (!emailContext) {
+      return res.status(404).json({ error: 'Could not generate email context' });
+    }
+
+    res.json({
+      emailType,
+      personalizedContext: emailContext,
+      preview: {
+        greeting: emailContext.greeting,
+        tone: emailContext.tone,
+        interests: emailContext.interests,
+        recommendations: emailContext.recommendations
+      }
+    });
+  } catch (error) {
+    console.error('Error generating email preview:', error);
+    res.status(500).json({ error: 'Failed to generate email preview' });
   }
 });
 
