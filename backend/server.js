@@ -10,6 +10,9 @@ const { Translate } = require('@google-cloud/translate').v2;
 const { GoogleGenAI } = require('@google/genai');  // Gemini AI
 const textToSpeech = require('@google-cloud/text-to-speech');
 const ttsClient = new textToSpeech.TextToSpeechClient();
+const speech = require('@google-cloud/speech');
+const speechClient = new speech.SpeechClient();
+
 
 
 // Add email functionality imports
@@ -59,7 +62,7 @@ async function translateText(text, targetLanguage) {
 }
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Sample responses
 const responses = {
@@ -91,7 +94,7 @@ app.post('/api/chat', async (req, res) => {
     let lead = await Lead.findOne({ sessionId });
     if (!lead) lead = new Lead({ sessionId });
 
-    const intentAnalysis = lead.analyzeIntent(message);
+    const intentAnalysis = lead.analyzeIntent ? lead.analyzeIntent(message) : { score: 0 };
     await lead.save();
 
     let detectedLanguage = 'english';
@@ -371,5 +374,71 @@ require('./lib/emailProcessor');
 app.listen(port, () => {
   connectDB();
   console.log(`Server is running on http://localhost:${port}`);
+});
+
+// --- STT ---
+app.post('/api/stt', async (req, res) => {
+  try {
+    const { audio } = req.body; // base64 (no data: prefix)
+    if (!audio) return res.status(400).json({ error: 'Audio data is required' });
+
+    const [response] = await speechClient.recognize({
+      audio: { content: audio },
+      config: {
+        encoding: 'WEBM_OPUS',
+        sampleRateHertz: 48000, // browser mic default
+        languageCode: 'en-US',
+      },
+    });
+
+    const transcript = response.results?.map(r => r.alternatives?.[0]?.transcript || '').join(' ').trim() || '';
+    res.json({ transcript });
+  } catch (error) {
+    console.error('STT error:', error);
+    res.status(500).json({ error: 'Speech-to-Text failed' });
+  }
+});
+
+// --- Voice Chat Pipeline ---
+app.post('/api/voice-chat', async (req, res) => {
+  try {
+    const { audio, sessionId } = req.body;
+    if (!audio) return res.status(400).json({ error: 'Audio data is required' });
+    if (!sessionId) return res.status(400).json({ error: 'Session ID is required' });
+
+    // 1. STT
+    const [sttResponse] = await speechClient.recognize({
+      audio: { content: audio },
+      config: {
+        encoding: 'WEBM_OPUS',
+        sampleRateHertz: 48000,
+        languageCode: 'en-US',
+      },
+    });
+    const transcript = sttResponse.results?.map(r => r.alternatives?.[0]?.transcript || '').join(' ').trim() || '';
+
+    // 2. Send transcript into your existing /api/chat (Gemini flow)
+    const fetch = require('node-fetch');
+    const chatResp = await fetch(`http://localhost:${port}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: transcript, sessionId }),
+    });
+    const chatJson = await chatResp.json();
+    const botText = chatJson.response || '';
+
+    // 3. TTS
+    const [ttsResponse] = await ttsClient.synthesizeSpeech({
+      input: { text: botText || '...' },
+      voice: { languageCode: 'en-US', name: 'en-US-Wavenet-I' },
+      audioConfig: { audioEncoding: 'MP3' },
+    });
+    const audioBase64 = ttsResponse.audioContent.toString('base64');
+
+    res.json({ transcript, botText, audioBase64 });
+  } catch (error) {
+    console.error('Voice Chat error:', error);
+    res.status(500).json({ error: 'Voice Chat failed' });
+  }
 });
 
