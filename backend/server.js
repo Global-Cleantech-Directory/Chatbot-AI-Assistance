@@ -8,6 +8,9 @@ const Message = require('./models/Message');
 const Lead = require('./models/Lead');
 const { Translate } = require('@google-cloud/translate').v2;
 const { GoogleGenAI } = require('@google/genai');  // Gemini AI
+const textToSpeech = require('@google-cloud/text-to-speech');
+const ttsClient = new textToSpeech.TextToSpeechClient();
+
 
 // Add email functionality imports
 const { scheduleFollowUpEmails, cancelFollowUpEmails } = require('./lib/emailScheduler');
@@ -27,7 +30,7 @@ const translate = new Translate({
 
 // Initialize Gemini AI
 const ai = new GoogleGenAI({
-  apiKey: process.env.GOOGLE_GENAI_API_KEY
+  apiKey: process.env.GOOGLE_GEMINI_API_KEY
 });
 
 // Helper function for translation
@@ -369,3 +372,4 @@ app.listen(port, () => {
   connectDB();
   console.log(`Server is running on http://localhost:${port}`);
 });
+
