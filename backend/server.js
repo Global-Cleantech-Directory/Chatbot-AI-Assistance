@@ -430,7 +430,7 @@ app.post('/api/voice-chat', async (req, res) => {
     // 3. TTS
     const [ttsResponse] = await ttsClient.synthesizeSpeech({
       input: { text: botText || '...' },
-      voice: { languageCode: 'en-US', name: 'en-US-Wavenet-I' },
+      voice: { languageCode: 'en-US', name: 'en-US-Neural2-C' },
       audioConfig: { audioEncoding: 'MP3' },
     });
     const audioBase64 = ttsResponse.audioContent.toString('base64');

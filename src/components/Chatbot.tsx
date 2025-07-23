@@ -268,7 +268,7 @@ const Chatbot: React.FC = () => {
                 <circle cx="18" cy="14" r="5" fill="#38BDF8" />
               </svg>
             </div>
-            <span className="font-bold text-lg text-gray-800">Global Trade Assistance™</span>
+            <span className="font-bold text-lg text-gray-800">AI Assistant</span>
           </div>
           <div className="relative">
             <button
@@ -304,7 +304,7 @@ const Chatbot: React.FC = () => {
 
         {/* Subtitle */}
         <div className="w-full bg-green-100 text-green-900 rounded-xl px-3 py-2 mb-4 text-center text-base font-medium">
-          Talk to me: I'm your smart assistant for global cleantech.
+          Talk or Message to me in your Language!
         </div>
 
         <div className="flex justify-center items-center mb-4 gap-2">
