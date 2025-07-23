@@ -21,6 +21,54 @@ const EmailSchedule = require('./models/EmailSchedule');
 const AssistantMemoryService = require('./lib/assistantMemory');
 const ConversationMemory = require('./models/ConversationMemory');
 
+function cleanMarkdownForTTS(text) {
+  if (!text) return '';
+  return text
+    // Remove all asterisks (single, double, triple)
+    .replace(/\*{1,3}/g, '')
+    // Remove underscores (single, double)
+    .replace(/_{1,2}/g, '')
+    // Remove backticks
+    .replace(/`+/g, '')
+    // Remove markdown blockquotes
+    .replace(/^>\s?/gm, '')
+    // Remove markdown headers
+    .replace(/^#+\s?/gm, '')
+    // Remove markdown lists
+    .replace(/^[-+*]\s+/gm, '')
+    // Remove extra newlines
+    .replace(/\n{2,}/g, '\n')
+    // Remove extra spaces
+    .replace(/\s{2,}/g, ' ')
+    // Remove stray markdown pipes (tables)
+    .replace(/\|/g, '')
+    // Remove stray tildes (code blocks)
+    .replace(/~+/g, '')
+    // Remove stray brackets (links/images)
+    .replace(/\[|\]|\(|\)/g, '')
+    .trim();
+}
+
+function getTTSVoiceForLang(langCode) {
+  // Map language code to Google TTS voice name and languageCode
+  const voices = {
+    en: { languageCode: 'en-US', name: 'en-US-Neural2-C' },
+    fr: { languageCode: 'fr-FR', name: 'fr-FR-Neural2-A' },
+    es: { languageCode: 'es-ES', name: 'es-ES-Neural2-A' },
+    de: { languageCode: 'de-DE', name: 'de-DE-Neural2-A' },
+    it: { languageCode: 'it-IT', name: 'it-IT-Neural2-A' },
+    pt: { languageCode: 'pt-PT', name: 'pt-PT-Neural2-A' },
+    nl: { languageCode: 'nl-NL', name: 'nl-NL-Neural2-A' },
+    ru: { languageCode: 'ru-RU', name: 'ru-RU-Wavenet-A' },
+    ja: { languageCode: 'ja-JP', name: 'ja-JP-Neural2-A' },
+    zh: { languageCode: 'cmn-CN', name: 'cmn-CN-Wavenet-A' },
+    ko: { languageCode: 'ko-KR', name: 'ko-KR-Neural2-A' },
+    ar: { languageCode: 'ar-XA', name: 'ar-XA-Wavenet-A' },
+    hi: { languageCode: 'hi-IN', name: 'hi-IN-Wavenet-A' },
+  };
+  return voices[langCode] || voices['en'];
+}
+
 const app = express();
 const port = process.env.PORT || 5003;
 
@@ -165,15 +213,21 @@ app.post('/api/chat', async (req, res) => {
 
     let detectedLanguage = 'english';
     let targetLang = 'en';
+    const supportedLanguages = {
+      english: 'en', french: 'fr', spanish: 'es', german: 'de',
+      italian: 'it', portuguese: 'pt', dutch: 'nl', russian: 'ru',
+      japanese: 'ja', chinese: 'zh', korean: 'ko', arabic: 'ar', hindi: 'hi'
+    };
     const detectedLanguages = lngDetector.detect(message);
     if (detectedLanguages.length > 0) {
-      detectedLanguage = detectedLanguages[0][0].toLowerCase();
-      const languageMap = { 
-        english: 'en', french: 'fr', spanish: 'es', german: 'de', 
-        italian: 'it', portuguese: 'pt', dutch: 'nl', russian: 'ru',
-        japanese: 'ja', chinese: 'zh', korean: 'ko'
-      };
-      targetLang = languageMap[detectedLanguage] || detectedLanguage;
+      const detected = detectedLanguages[0][0].toLowerCase();
+      if (supportedLanguages[detected]) {
+        detectedLanguage = detected;
+        targetLang = supportedLanguages[detected];
+      } else {
+        detectedLanguage = 'english';
+        targetLang = 'en';
+      }
     }
 
     let response;
@@ -262,7 +316,7 @@ app.post('/api/chat', async (req, res) => {
     res.json({ 
       response, 
       messageId: botMessage._id, 
-      detectedLanguage,
+      detectedLanguage: targetLang,
       intentScore: intentAnalysis.score,
       sessionId: sessionId
     });
@@ -642,10 +696,25 @@ app.post('/api/voice-chat', async (req, res) => {
         encoding: 'WEBM_OPUS',
         sampleRateHertz: 48000,
         languageCode: 'en-US',
-        alternativeLanguageCodes: ['es-ES', 'fr-FR', 'de-DE'],
+        alternativeLanguageCodes: ['es-ES', 'fr-FR', 'de-DE', 'ar-XA', 'hi-IN', 'ru-RU', 'zh', 'ja-JP', 'ko-KR', 'it-IT', 'pt-PT', 'nl-NL'],
       },
     });
     const transcript = sttResponse.results?.map(r => r.alternatives?.[0]?.transcript || '').join(' ').trim() || '';
+
+    // Detect language from transcript
+    const supportedLanguages = {
+      english: 'en', french: 'fr', spanish: 'es', german: 'de',
+      italian: 'it', portuguese: 'pt', dutch: 'nl', russian: 'ru',
+      japanese: 'ja', chinese: 'zh', korean: 'ko', arabic: 'ar', hindi: 'hi'
+    };
+    let detectedLanguage = 'en';
+    const detectedLanguages = lngDetector.detect(transcript);
+    if (detectedLanguages.length > 0) {
+      const detected = detectedLanguages[0][0].toLowerCase();
+      if (supportedLanguages[detected]) {
+        detectedLanguage = supportedLanguages[detected];
+      }
+    }
 
     if (!transcript) {
       return res.status(400).json({ error: 'Could not transcribe audio' });
@@ -661,14 +730,23 @@ app.post('/api/voice-chat', async (req, res) => {
     const chatJson = await chatResp.json();
     const botText = chatJson.response || 'I apologize, but I could not process your request.';
 
-    // 3. Text-to-Speech
+    // Clean markdown for TTS
+    let ttsText = cleanMarkdownForTTS(botText);
+
+    // If detected language is not English, translate the TTS text
+    if (detectedLanguage !== 'en') {
+      try {
+        ttsText = await translateText(ttsText, detectedLanguage);
+      } catch (e) {
+        // If translation fails, fallback to original text
+      }
+    }
+
+    // 3. Text-to-Speech (use detected language and voice)
+    const ttsVoice = getTTSVoiceForLang(detectedLanguage);
     const [ttsResponse] = await ttsClient.synthesizeSpeech({
-      input: { text: botText },
-      voice: { 
-        languageCode: 'en-US', 
-        name: 'en-US-Neural2-C',
-        ssmlGender: 'FEMALE'
-      },
+      input: { text: ttsText },
+      voice: ttsVoice,
       audioConfig: { 
         audioEncoding: 'MP3',
         speakingRate: 1.0,
@@ -681,6 +759,7 @@ app.post('/api/voice-chat', async (req, res) => {
       transcript, 
       botText, 
       audioBase64,
+      detectedLanguage,
       confidence: sttResponse.results?.[0]?.alternatives?.[0]?.confidence || 0
     });
   } catch (error) {

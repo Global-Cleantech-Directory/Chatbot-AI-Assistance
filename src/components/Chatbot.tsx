@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
 import { Home, MessageSquare, Settings, Upload, Mic as MicIcon, Send, Trash2, X } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
 interface ChatbotProps {
   open?: boolean;
@@ -42,7 +43,8 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
   // UI state
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessingVoice, setIsProcessingVoice] = useState(false);
-  const [selectedLang, setSelectedLang] = useState('auto');
+  // Change default selectedLang from 'auto' to 'en'
+  const [selectedLang, setSelectedLang] = useState('en');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [activeTab, setActiveTab] = useState<'home' | 'messages' | 'settings'>('home');
@@ -71,6 +73,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
     { code: 'pt', label: 'Portuguese' },
     { code: 'it', label: 'Italian' },
     { code: 'nl', label: 'Dutch' },
+    { code: 'ar', label: 'Arabic' }, // <-- Added Arabic
   ];
 
   // Quick chat options
@@ -201,6 +204,13 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
     return btoa(binary);
   };
 
+  // Helper to get language label from code
+  const getLanguageLabel = (code: string) => {
+    if (!code) return '';
+    const found = languageOptions.find(opt => opt.code.toLowerCase() === code.toLowerCase());
+    return found ? found.label : code;
+  };
+
   // Session management
   const createNewSession = () => {
     const newSession: ChatSession = {
@@ -226,6 +236,21 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
     );
   };
 
+  // Add a function to generate a chat title using Gemini
+  const generateChatTitle = async (sessionId: string, firstBotMessage: string) => {
+    try {
+      const response = await axios.post('http://localhost:5004/api/ai', {
+        prompt: `Generate a short, descriptive chat title for this conversation based on the following assistant response: "${firstBotMessage}". The title should be concise and relevant to the topic.`,
+        context: 'chat title generation',
+        sessionId,
+      });
+      // Use the response text as the title, fallback to the first bot message if not available
+      return (response.data.response || firstBotMessage).split('\n')[0].substring(0, 40);
+    } catch (e) {
+      return firstBotMessage.substring(0, 40);
+    }
+  };
+
   // Message handling
   const addMessage = (message: Partial<Message>) => {
     const newMessage: Message = {
@@ -239,20 +264,24 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
       date: getDateLabel(),
       ...message
     };
-    // Use functional update to avoid stale closure and ensure all messages are appended
     setMessages(prevMessages => {
       const updatedMessages = [...prevMessages, newMessage];
       if (activeSessionId) {
         updateSessionMessages(activeSessionId, updatedMessages);
-        // Update session title if first message
-        if (updatedMessages.length === 1 && message.text) {
-          setSessions(prev => 
-            prev.map(session => 
-              session.id === activeSessionId 
-                ? { ...session, title: message.text!.substring(0, 30) + (message.text!.length > 30 ? '...' : '') } 
-                : session
-            )
-          );
+        // If this is the first bot message, generate a chat title using Gemini
+        const isFirstBotMessage =
+          newMessage.sender === 'bot' &&
+          updatedMessages.filter(m => m.sender === 'bot').length === 1;
+        if (isFirstBotMessage && newMessage.text) {
+          generateChatTitle(activeSessionId, newMessage.text).then((title) => {
+            setSessions(prev =>
+              prev.map(session =>
+                session.id === activeSessionId
+                  ? { ...session, title: title }
+                  : session
+              )
+            );
+          });
         }
       }
       return updatedMessages;
@@ -366,7 +395,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
         languageCode: selectedLang === 'auto' ? 'en-US' : selectedLang,
       });
 
-      const { transcript, botText, audioBase64 } = response.data;
+      const { transcript, botText, audioBase64, detectedLanguage } = response.data;
 
       if (transcript?.trim()) {
         addMessage({
@@ -386,7 +415,8 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
         audioBase64: audioBase64 || undefined,
         isAudioPlaying: true, // Set to true to auto-play through the audio element
         time: getCurrentTime(),
-        date: getDateLabel()
+        date: getDateLabel(),
+        language: detectedLanguage,
       };
       addMessage(botMessage);
 
@@ -524,7 +554,10 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
   if (!open) return null;
 
   const handleMicClick = () => {
+    // Stop all audio if any is playing before starting recording
     stopAllAudio();
+    // Also update message state so all isAudioPlaying are false
+    setMessages(prevMessages => prevMessages.map(msg => ({ ...msg, isAudioPlaying: false })));
 
     if (isRecording) {
       stopRecording();
@@ -532,6 +565,9 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
       startRecording();
     }
   };
+
+  // Find the active session
+  const activeSession = sessions.find(s => s.id === activeSessionId);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
@@ -544,8 +580,10 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                 <span className="text-[#a3c9a8] text-xl">🌱</span>
               </div>
               <div>
-                <h1 className="text-[#333333] text-lg font-semibold">Global Clean Tech</h1>
-                <p className="text-[#333333]/60 text-xs">Eco Assistant</p>
+                <h1 className="text-[#333333] text-lg font-semibold">
+                  {activeSession?.title || 'AI Assistant'}
+                </h1>
+                <p className="text-[#333333]/60 text-xs">Global CleanTech Directory</p>
               </div>
             </div>
             
@@ -795,7 +833,11 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                                     : 'bg-[#d5e8d4]'
                                 }`}
                               >
-                                <p className="text-[#333333] text-sm">{message.text}</p>
+                                <div className="prose prose-sm text-[#333333]">
+                                  <ReactMarkdown>
+                                    {message.text || ''}
+                                  </ReactMarkdown>
+                                </div>
                                 {message.audioBase64 && (
                                   <div className="mt-2 flex flex-col gap-2">
                                     <div className="flex items-center gap-2">
@@ -872,7 +914,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                                 )}
                                 {message.language && (
                                   <p className="text-xs text-[#333333]/60 mt-1">
-                                    Detected language: {message.language}
+                                    Detected language: {getLanguageLabel(message.language)}
                                   </p>
                                 )}
                               </div>
