@@ -18,6 +18,10 @@ interface Message {
   language?: string;
   time?: string;
   date?: string;
+  audioBase64?: string;
+  isAudioPlaying?: boolean;
+  currentTime?: number; // Add this
+  duration?: number;    // Add this
 }
 
 interface ChatSession {
@@ -38,26 +42,19 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
   // UI state
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessingVoice, setIsProcessingVoice] = useState(false);
-  const [isBotSpeaking, setIsBotSpeaking] = useState(false);
   const [selectedLang, setSelectedLang] = useState('auto');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [activeTab, setActiveTab] = useState<'home' | 'messages' | 'settings'>('home');
   const [currentView, setCurrentView] = useState<'main' | 'chat'>('main');
   const [showMenuId, setShowMenuId] = useState<string | null>(null);
-
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentAudioTime, setCurrentAudioTime] = useState(0);
-  const [audioDuration, setAudioDuration] = useState(0);
+  const [isUserAtBottom, setIsUserAtBottom] = useState(true);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  
 
   // Language options
   const languageOptions = [
@@ -138,27 +135,37 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
     }
   }, [activeSessionId, sessions]);
 
-  // Scroll to bottom when messages change
+  // Scroll to bottom when messages change, but only if user is at bottom
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
   // Initialize audio
   useEffect(() => {
-    audioRef.current = new Audio();
+    // audioRef.current = new Audio(); // Removed audioRef
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
+      // if (audioRef.current) { // Removed audioRef
+      //   audioRef.current.pause();
+      //   audioRef.current = null;
+      // }
     };
   }, []);
 
   // Helper functions
   const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
   
+  // Track user scroll position
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    const threshold = 60; // px from bottom
+    setIsUserAtBottom(target.scrollHeight - target.scrollTop - target.clientHeight < threshold);
+  };
+
+  // Scroll to bottom only if user is at bottom
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (isUserAtBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   };
 
   const getCurrentTime = () => {
@@ -232,24 +239,24 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
       date: getDateLabel(),
       ...message
     };
-    
-    const updatedMessages = [...messages, newMessage];
-    setMessages(updatedMessages);
-    
-    if (activeSessionId) {
-      updateSessionMessages(activeSessionId, updatedMessages);
-      
-      // Update session title if first message
-      if (updatedMessages.length === 1 && message.text) {
-        setSessions(prev => 
-          prev.map(session => 
-            session.id === activeSessionId 
-              ? { ...session, title: message.text!.substring(0, 30) + (message.text!.length > 30 ? '...' : '') } 
-              : session
-          )
-        );
+    // Use functional update to avoid stale closure and ensure all messages are appended
+    setMessages(prevMessages => {
+      const updatedMessages = [...prevMessages, newMessage];
+      if (activeSessionId) {
+        updateSessionMessages(activeSessionId, updatedMessages);
+        // Update session title if first message
+        if (updatedMessages.length === 1 && message.text) {
+          setSessions(prev => 
+            prev.map(session => 
+              session.id === activeSessionId 
+                ? { ...session, title: message.text!.substring(0, 30) + (message.text!.length > 30 ? '...' : '') } 
+                : session
+            )
+          );
+        }
       }
-    }
+      return updatedMessages;
+    });
   };
 
   // Clear functions
@@ -309,6 +316,44 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
     }
   };
 
+  const stopAllAudio = () => {
+    document.querySelectorAll('audio').forEach(audio => {
+      audio.pause();
+      audio.currentTime = 0;
+    });
+  };
+
+  const toggleAudio = async (messageId: string) => {
+    setMessages(prevMessages => {
+      const updatedMessages = prevMessages.map(msg => {
+        if (msg.id === messageId) {
+          const isPlaying = !msg.isAudioPlaying;
+          
+          // Stop all audio when playing a new one
+          if (isPlaying) {
+            stopAllAudio();
+          }
+
+          return {
+            ...msg,
+            isAudioPlaying: isPlaying
+          };
+        }
+        return {
+          ...msg,
+          isAudioPlaying: false // Pause other audio
+        };
+      });
+      
+      if (activeSessionId) {
+        updateSessionMessages(activeSessionId, updatedMessages);
+      }
+      
+      return updatedMessages;
+    });
+  };
+
+  // Process voice input
   const processVoiceInput = async (audioBlob: Blob) => {
     setIsProcessingVoice(true);
     try {
@@ -323,7 +368,6 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
 
       const { transcript, botText, audioBase64 } = response.data;
 
-      // Add user message (transcript)
       if (transcript?.trim()) {
         addMessage({
           text: transcript,
@@ -332,36 +376,20 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
         });
       }
 
-      // Add bot response
-      addMessage({
+      // Add bot response with audio
+      const botMessage: Message = {
+        id: generateId(),
         text: botText || "Sorry, I couldn't process your voice message.",
         sender: 'bot',
+        timestamp: new Date(),
         avatar: '/Global Cleantech Directory_logo.png',
-      });
+        audioBase64: audioBase64 || undefined,
+        isAudioPlaying: true, // Set to true to auto-play through the audio element
+        time: getCurrentTime(),
+        date: getDateLabel()
+      };
+      addMessage(botMessage);
 
-      // Play bot response audio
-      if (audioBase64 && audioRef.current) {
-        const audioUrl = `data:audio/mp3;base64,${audioBase64}`;
-        audioRef.current.src = audioUrl;
-        
-        // Set up audio event listeners
-        audioRef.current.onloadedmetadata = () => {
-          setAudioDuration(audioRef.current?.duration || 0);
-        };
-        
-        audioRef.current.ontimeupdate = () => {
-          setCurrentAudioTime(audioRef.current?.currentTime || 0);
-        };
-        
-        audioRef.current.onended = () => {
-          setIsPlaying(false);
-          setIsBotSpeaking(false);
-        };
-        
-        await audioRef.current.play();
-        setIsPlaying(true);
-        setIsBotSpeaking(true);
-      }
     } catch (error) {
       console.error('Error processing voice input:', error);
       addMessage({
@@ -374,51 +402,12 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
     }
   };
 
-  const togglePlayPause = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play();
-      }
-      setIsPlaying(!isPlaying);
-    }
-  };
-
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newTime = parseFloat(e.target.value);
-    if (audioRef.current) {
-      audioRef.current.currentTime = newTime;
-      setCurrentAudioTime(newTime);
-    }
-  };
-
-  const handleMicClick = () => {
-    if (isBotSpeaking && audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      setIsBotSpeaking(false);
-      startRecording();
-      return;
-    }
-
-    if (isRecording) stopRecording();
-    else startRecording();
-  };
-
-  const handleStopVoice = () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current.src = "";
-    }
-  };
-
   // Chat functions
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
+    // Add user message (typed) to chat
     addMessage({
       text: input,
       sender: 'user',
@@ -509,7 +498,40 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
 
   const messageGroups = groupMessagesByDate(messages);
 
+  const formatTime = (time: number) => {
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+  };
+
+  const handleAudioTimeUpdate = (messageId: string, currentTime: number, duration: number) => {
+    setMessages(prevMessages => 
+      prevMessages.map(msg => 
+        msg.id === messageId 
+          ? { ...msg, currentTime, duration }
+          : msg
+      )
+    );
+  };
+
+  const handleSeek = (messageId: string, newTime: number) => {
+    const audioElement = document.querySelector(`audio[data-message-id="${messageId}"]`) as HTMLAudioElement;
+    if (audioElement) {
+      audioElement.currentTime = newTime;
+    }
+  };
+
   if (!open) return null;
+
+  const handleMicClick = () => {
+    stopAllAudio();
+
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
@@ -741,7 +763,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
           {/* Chat View */}
           {currentView === 'chat' && (
             <div className="flex flex-col h-full">
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6" onScroll={handleScroll}>
                 {messages.length === 0 ? (
                   <div className="flex items-center justify-center h-full">
                     <div className="text-center">
@@ -774,6 +796,80 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                                 }`}
                               >
                                 <p className="text-[#333333] text-sm">{message.text}</p>
+                                {message.audioBase64 && (
+                                  <div className="mt-2 flex flex-col gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() => toggleAudio(message.id)}
+                                        className="p-1 bg-white rounded-full shadow"
+                                      >
+                                        {message.isAudioPlaying ? (
+                                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M6 19h4V5H6v14zM14 5v14h4V5h-4z" fill="#333333"/>
+                                          </svg>
+                                        ) : (
+                                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            <path d="M8 5v14l11-7z" fill="#333333"/>
+                                          </svg>
+                                        )}
+                                      </button>
+                                      <div className="flex-1 flex items-center gap-2">
+                                        <input
+                                          type="range"
+                                          min={0}
+                                          max={message.duration || 0}
+                                          value={message.currentTime || 0}
+                                          onChange={(e) => handleSeek(message.id, parseFloat(e.target.value))}
+                                          className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                                          style={{
+                                            background: message.duration 
+                                              ? `linear-gradient(to right, #a3c9a8 0%, #a3c9a8 ${((message.currentTime || 0) / message.duration) * 100}%, #e5e7eb ${((message.currentTime || 0) / message.duration) * 100}%, #e5e7eb 100%)`
+                                              : undefined
+                                          }}
+                                        />
+                                        <span className="text-xs text-gray-500 min-w-[60px] text-right">
+                                          {formatTime(message.currentTime || 0)} / {formatTime(message.duration || 0)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <audio
+                                      data-message-id={message.id}
+                                      src={`data:audio/mp3;base64,${message.audioBase64}`}
+                                      onEnded={() => toggleAudio(message.id)}
+                                      onTimeUpdate={(e) => {
+                                        const audio = e.currentTarget;
+                                        handleAudioTimeUpdate(message.id, audio.currentTime, audio.duration);
+                                      }}
+                                      onLoadedMetadata={(e) => {
+                                        const audio = e.currentTarget;
+                                        handleAudioTimeUpdate(message.id, 0, audio.duration);
+                                      }}
+                                      onError={(e: React.SyntheticEvent<HTMLAudioElement, Event>) => {
+                                        console.error('Audio playback error:', e);
+                                        toggleAudio(message.id);
+                                      }}
+                                      ref={(audioElement: HTMLAudioElement | null) => {
+                                        if (audioElement) {
+                                          try {
+                                            if (message.isAudioPlaying) {
+                                              const playPromise = audioElement.play();
+                                              if (playPromise !== undefined) {
+                                                playPromise.catch(() => {
+                                                  // Ignore play interruption errors
+                                                });
+                                              }
+                                            } else {
+                                              audioElement.pause();
+                                            }
+                                          } catch (error) {
+                                            console.error('Audio control error:', error);
+                                          }
+                                        }
+                                      }}
+                                      className="hidden"
+                                    />
+                                  </div>
+                                )}
                                 {message.language && (
                                   <p className="text-xs text-[#333333]/60 mt-1">
                                     Detected language: {message.language}
@@ -918,7 +1014,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
             </button>
           </div>
         </div>
-      </div>
+      </div> {/* End main container */}
     </div>
   );
 };
