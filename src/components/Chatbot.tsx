@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-import { Home, MessageSquare, Settings, Upload, Mic as MicIcon, Send, Trash2, X } from 'lucide-react';
+import { Home, MessageSquare, HelpCircle, Upload, Mic as MicIcon, Send, Trash2, X, ChevronRight } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
 interface ChatbotProps {
@@ -32,6 +32,82 @@ interface ChatSession {
   messages: Message[];
 }
 
+// FAQ Accordion Component
+const faqs = [
+  {
+    q: 'How do I create an account?',
+    a: 'Creating an account on Global Cleantech Directory is simple and FREE. Click the “sign in” button at the top of the page, fill out your basic info, and confirm your email. You’re now ready to explore clean technology listings, connect with others, and start promoting your business.'
+  },
+  {
+    q: 'How do I list my company or service?',
+    a: 'After creating your account, click “Add Listing” in the main menu. Choose your category, add your business details, upload your logo, and highlight your services. All listings are reviewed and approved by our admin team to ensure high quality and trust.'
+  },
+  {
+    q: 'Can I try the platform before paying?',
+    a: 'Yes! We offer a free trial so you can explore features, add your company, and see the value before choosing a membership. This way, you can experience how Global Cleantech Directory helps you grow your network and visibility worldwide.'
+  },
+  {
+    q: 'Which membership option is the best?',
+    a: "Membership Plans & Start Date Our membership plans are available in 6-month and 1-year options, with the 1-year plan offering the best value. Your selected plan begins only when you submit it, so you can upgrade when you're ready — with no pressure and full flexibility."
+  },
+  {
+    q: 'Can I track my performance?',
+    a: 'Yes! Your dashboard shows real-time stats like views, leads, and reviews — updated weekly and monthly. It’s a simple way to measure impact and see the results of being on a platform built for visibility and growth. We’re proud to give our members clear insights that reflect real engagement.'
+  },
+  {
+    q: 'How can visitors contact me?',
+    a: 'Each member has a professional listing page with a built-in contact form. Visitors can message you directly through your page, and all replies will go straight to your email. It’s a simple, direct way to connect with potential clients, partners, or collaborators — right through the directory.'
+  },
+  {
+    q: 'How do I update or Cancel my plan?',
+    a: 'You can manage everything related to your plans right from your dashboard. Just click on “Billing” to update your payment method, upgrade or downgrade your plan, or cancel it anytime. There are no hidden fees, and you’re always in control of your membership.'
+  },
+  {
+    q: 'When will my membership renew?',
+    a: 'Memberships are not renewed automatically without notice. Before we renew your plan, you’ll receive an email letting you know your current membership is about to end. This gives you time to review, make changes, or confirm your renewal.'
+  },
+  {
+    q: 'Can I add pictures and videos?',
+    a: 'Yes! You can upload product photos and a short video to showcase your solutions in action. Visuals help visitors quickly understand what you offer and build stronger trust. Whether it’s a product demo, installation process, or company intro, adding media gives your listing a more professional and engaging presence. Just head to your dashboard, open your listing, and upload your files in the media section.'
+  },
+  {
+    q: 'Can I add a Q&A to support visitor?',
+    a: 'Absolutely. The Q&A section is your space to answer the most common questions about your products or services. It helps visitors feel informed, confident, and ready to reach out — especially if they’re comparing different providers. Our team is here to support you. We’ll help you shape clear, helpful answers that speak directly to your audience and improve your listing’s quality and visibility.'
+  },
+  {
+    q: 'How do I create an event?',
+    a: 'You can easily create and share events through your listing to highlight upcoming trade shows, workshops, or in-person opportunities. Events help you stay active on the platform and give visitors a reason to engage with your business. Once submitted, your event will be reviewed by our team to ensure quality and accuracy. After approval, it will be visible on your listing for others to discover and attend.'
+  },
+  {
+    q: 'How do categories & subcategories work?',
+    a: 'Selecting the right categories and subcategories helps your listing appear in the most relevant searches across the platform. Categories represent broad cleantech sectors like AgriTech, while subcategories focus on specific solutions like LED Grow Lights . Choosing the best fit makes it easier for users to find your business.'
+  },
+];
+
+const FAQAccordion: React.FC = () => {
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
+  return (
+    <div className="space-y-2">
+      {faqs.map((faq, idx) => (
+        <div key={idx} className="rounded-xl border border-[#E3F0FA] bg-white overflow-hidden">
+          <button
+            className={`w-full text-left py-2 px-3 flex items-center justify-between focus:outline-none transition-colors ${openIndex === idx ? 'bg-[#E3F0FA]' : 'hover:bg-[#F5F8FA]'}`}
+            onClick={() => setOpenIndex(openIndex === idx ? null : idx)}
+          >
+            <span className="font-semibold text-[#145DA0] text-sm">{faq.q}</span>
+            <ChevronRight className={`w-4 h-4 ml-2 transition-transform ${openIndex === idx ? 'rotate-90 text-[#145DA0]' : 'text-[#B3DAF7]'}`} />
+          </button>
+          {openIndex === idx && (
+            <div className="px-4 pb-3 pt-1 bg-[#E3F0FA] text-[#333] text-xs rounded-b-xl">
+              {faq.a}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) => {
   // Chat state
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -51,6 +127,13 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
   const [currentView, setCurrentView] = useState<'main' | 'chat'>('main');
   const [showMenuId, setShowMenuId] = useState<string | null>(null);
   const [isUserAtBottom, setIsUserAtBottom] = useState(true);
+  // Search state for chat sessions
+  const [searchQuery, setSearchQuery] = useState('');
+  // Admin view state
+  const [adminView, setAdminView] = useState(false);
+
+  // Find the active session (move this above useEffects that use it)
+  const activeSession = sessions.find(s => s.id === activeSessionId);
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -76,15 +159,41 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
     { code: 'ar', label: 'Arabic' }, // <-- Added Arabic
   ];
 
-  // Quick chat options
-  const quickChatOptions = [
-    { icon: '🌞', title: 'Solar Energy', text: 'Tell me about solar panel installation and benefits' },
-    { icon: '♻️', title: 'Recycling Guide', text: 'How can I improve my recycling practices?' },
-    { icon: '🚗', title: 'Electric Vehicles', text: 'What are the best electric vehicle options?' },
-    { icon: '🏠', title: 'Green Buildings', text: 'Show me sustainable building materials and practices' },
-    { icon: '💡', title: 'Energy Efficiency', text: 'How can I reduce my energy consumption at home?' },
-    { icon: '🌱', title: 'Carbon Footprint', text: 'Help me calculate and reduce my carbon footprint' }
+  // Continent options for home page
+  const continentOptions = [
+    { image: '/africa-globe.png', title: 'Africa' },
+    { image: '/asia-globe.png', title: 'Asia' },
+    { image: '/europe-globe.png', title: 'Europe' },
+    { image: '/north-america-globe.png', title: 'North America' },
+    { image: '/south-america-globe.png', title: 'South America' },
+    { image: '/australia-globe.png', title: 'Australia' },
   ];
+
+  // Categories for dropdown
+  const categories = [
+    'Agritech Sustainable Agriculture',
+    'Artificial Intelligence AI',
+    'Environmental Sustainability Association',
+    'Environmental Monitoring Analysis',
+    'Environmental Sustainability Education',
+    'Food Sustainability Solutions',
+    'Forest Sustainable Development',
+    'Green Building Sustainability',
+    'Green Economy Trade',
+    'Green Manufacturing Sustainability',
+    'Green Sustainable Chemistry',
+    'Land Sustainable Development',
+    'Ocean Sustainable Development',
+    'Professional Service Environment',
+    'Renewable Energy Sustainability',
+    'Smart City Sustainable',
+    'Space Sustainability Solutions',
+    'Sustainable Transportation Solutions',
+    'Waste Management Sustainable',
+    'Water Management Sustainable',
+  ];
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const deleteChatSession = (sessionId: string) => {
     const newSessions = sessions.filter(session => session.id !== sessionId);
@@ -215,7 +324,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
   const createNewSession = () => {
     const newSession: ChatSession = {
       id: generateId(),
-      title: 'New Chat',
+      title: 'AI Assistant', // Changed from 'New Chat' to 'AI Assistant'
       createdAt: new Date(),
       messages: []
     };
@@ -293,6 +402,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
     localStorage.removeItem('chatSessions');
     setSessions([]);
     createNewSession();
+    setActiveTab('home'); // Highlight Home tab after clearing
   };
 
   const clearCurrentChat = () => {
@@ -548,8 +658,62 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
     const audioElement = document.querySelector(`audio[data-message-id="${messageId}"]`) as HTMLAudioElement;
     if (audioElement) {
       audioElement.currentTime = newTime;
+      // If audio is paused, update the message state so when play is pressed, it resumes from the new position
+      setMessages(prevMessages =>
+        prevMessages.map(msg =>
+          msg.id === messageId
+            ? { ...msg, currentTime: newTime }
+            : msg
+        )
+      );
     }
   };
+
+  // Helper to determine if this is a new chat (no bot messages yet)
+  const isNewChat = messages.filter(m => m.sender === 'bot').length === 0;
+  // Track the chat title for the current session
+  const [chatTitle, setChatTitle] = useState('Chat Topic');
+
+  // Update chatTitle when the session changes or when a new title is generated
+  useEffect(() => {
+    // Only set to 'New Chat' if there is no title yet for this session
+    if (activeSession?.title && activeSession.title !== 'AI Assistant') {
+      setChatTitle(activeSession.title);
+    } else if (!activeSession?.title || activeSession.title === 'AI Assistant') {
+      setChatTitle('Chat Topic');
+    }
+    // Do not reset chatTitle to 'New Chat' if a title has already been set
+    // This ensures the title stays once generated
+  }, [activeSessionId]);
+
+  // Update session title and chatTitle when the first bot message is added
+  useEffect(() => {
+    if (!isNewChat && activeSession && activeSession.title === 'AI Assistant') {
+      // Find the first bot message
+      const firstBotMsg = messages.find(m => m.sender === 'bot' && m.text);
+      if (firstBotMsg && firstBotMsg.text) {
+        generateChatTitle(activeSessionId, firstBotMsg.text).then((title) => {
+          setSessions(prev =>
+            prev.map(session =>
+              session.id === activeSessionId
+                ? { ...session, title: title }
+                : session
+            )
+          );
+          setChatTitle(title); // This will only set once per session
+        });
+      }
+    }
+  }, [isNewChat, messages, activeSession, activeSessionId]);
+
+  // When the chatbot is opened, always create a new chat and show the new chat menu
+  useEffect(() => {
+    if (open) {
+      createNewSession();
+      setCurrentView('chat');
+      setActiveTab('home'); // Only Home tab is selected
+    }
+  }, [open]);
 
   if (!open) return null;
 
@@ -566,22 +730,19 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
     }
   };
 
-  // Find the active session
-  const activeSession = sessions.find(s => s.id === activeSessionId);
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4">
-      <div className="w-full max-w-md h-[600px] bg-[#f5f7f4] rounded-3xl shadow-xl flex flex-col overflow-hidden">
+      <div className="w-full max-w-md h-[600px] bg-[#f5f8fa] rounded-3xl shadow-xl flex flex-col overflow-hidden">
         {/* Header Section */}
         <div className="bg-white px-6 py-4 border-b-2 border-[#e0e0e0]">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-[#d5e8d4] rounded-full flex items-center justify-center">
-                <span className="text-[#a3c9a8] text-xl">🌱</span>
+              <div className="w-[72px] h-[72px] flex items-center justify-center overflow-visible bg-white p-0 m-0">
+                <img src="/ai-leaf-logo.png" alt="AI Leaf Logo" className="w-[72px] h-[72px] object-contain" />
               </div>
               <div>
                 <h1 className="text-[#333333] text-lg font-semibold">
-                  {activeSession?.title || 'AI Assistant'}
+                  AI Assistant
                 </h1>
                 <p className="text-[#333333]/60 text-xs">Global CleanTech Directory</p>
               </div>
@@ -620,18 +781,9 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                 )}
               </div>
               
-              {currentView === 'chat' && messages.length > 0 && (
-                <button
-                  onClick={clearCurrentChat}
-                  className="text-[#333333] hover:text-[#a3c9a8] transition-colors p-1"
-                  title="Clear current chat"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
-              )}
               <button 
                 onClick={() => setOpen(false)}
-                className="text-[#333333] hover:text-[#a3c9a8] transition-colors text-2xl"
+                className="text-[#333333] hover:text-[#145DA0] transition-colors text-2xl"
                 title="Close chat"
               >
                 ×
@@ -641,8 +793,8 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
           
           {/* Subtitle */}
           {currentView === 'chat' && (
-            <div className="w-full bg-green-100 text-green-900 rounded-xl px-3 py-2 mt-2 text-center text-base font-medium">
-              Talk or Message to me in your Language!
+            <div className="w-full rounded-xl px-3 py-2 mt-2 text-center text-base font-medium" style={{ background: '#E3F0FA', color: chatTitle === 'Chat Topic' ? '#5C6F81' : '#145DA0' }}>
+              {chatTitle}
             </div>
           )}
         </div>
@@ -651,53 +803,68 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
         <div className="flex-1 overflow-y-auto">
           {/* Home Tab */}
           {activeTab === 'home' && currentView === 'main' && (
-            <div className="p-6 space-y-6">
-              <div className="text-center">
-                <div className="w-16 h-16 bg-[#d5e8d4] rounded-full flex items-center justify-center mx-auto mb-4">
-                  <span className="text-[#a3c9a8] text-2xl">🌍</span>
-                </div>
-                <h2 className="text-[#333333] text-xl font-bold">Welcome to Global Clean Tech!</h2>
-                <p className="text-[#333333]/70 text-sm mt-2">Your AI assistant for sustainable living and clean technology</p>
-              </div>
-              
-              <div className="space-y-3">
-                <h3 className="text-[#333333] font-semibold text-sm">Quick Chat Options:</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  {quickChatOptions.map((option, idx) => (
-                    <button
-                      key={idx}
-                      onClick={() => handleQuickChat(option.text)}
-                      className="p-3 bg-white rounded-2xl border border-[#e0e0e0] hover:bg-[#d5e8d4] transition-colors text-left"
-                    >
-                      <div className="text-2xl mb-2">{option.icon}</div>
-                      <div className="text-[#333333] font-medium text-xs">{option.title}</div>
-                    </button>
-                  ))}
-                </div>
-              </div>
+            // Show the new chat screen only (same as empty chat view)
+            <div className="flex flex-col items-center justify-center text-center h-full w-full p-8">
+              <button
+                onClick={handleMicClick}
+                className={`w-20 h-20 rounded-2xl flex items-center justify-center mb-5 shadow-lg transition-all duration-200 focus:outline-none border border-[#145DA0] hover:scale-105 hover:shadow-xl ${isRecording ? 'animate-pulse' : ''}`}
+                style={isRecording
+                  ? { background: 'linear-gradient(135deg, #B3DAF7 0%, #E3F0FA 100%)' }
+                  : { background: '#B3DAF7' }}
+                title={isRecording ? 'Stop recording' : 'Start voice message'}
+                type="button"
+                aria-label={isRecording ? 'Stop recording' : 'Start voice message'}
+                disabled={isProcessingVoice}
+              >
+                <MicIcon className={`w-10 h-10 ${isRecording ? 'text-green-500' : ''}`} style={!isRecording ? { color: '#145DA0' } : { color: '#22c55e' }} />
+              </button>
+              <p className="text-2xl font-semibold leading-snug tracking-tight" style={{ color: '#145DA0', lineHeight: '2.1rem', letterSpacing: '-0.01em' }}>
+                Talk or Message to me <br />in your Language!
+              </p>
             </div>
           )}
 
           {/* Messages Tab */}
           {activeTab === 'messages' && currentView === 'main' && (
             <div className="p-4 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-[#333333] text-lg font-bold">Chat History</h2>
-                <button
-                  onClick={startNewChat}
-                  className="bg-[#a3c9a8] hover:bg-[#a3c9a8]/90 text-white px-3 py-1 rounded-full text-sm font-medium transition-colors"
-                >
-                  + New Chat
-                </button>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-[#145DA0] text-lg font-bold">Multiple Chats</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      createNewSession();
+                      setActiveTab('home'); // Highlight Home tab
+                      setCurrentView('main');
+                    }}
+                    className="bg-[#145DA0] hover:bg-[#145DA0]/90 text-white px-3 py-1 rounded-full text-sm font-medium transition-colors"
+                  >
+                    + New Chat
+                  </button>
+                </div>
               </div>
-              
+              {/* Search input for chat sessions */}
+              <input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search chats..."
+                className="w-full mb-3 px-3 py-2 rounded-lg border border-[#E3F0FA] bg-[#F5F8FA] text-[#145DA0] placeholder-[#145DA0]/50 focus:outline-none focus:ring-2 focus:ring-[#145DA0] text-sm"
+                type="text"
+              />
               {sessions.length > 0 ? (
                 <div className="space-y-2">
-                  {sessions.map(session => (
+                  {sessions
+                    .filter(session => {
+                      const q = searchQuery.toLowerCase();
+                      return (
+                        session.title.toLowerCase().includes(q) ||
+                        session.messages.some(m => (m.text || '').toLowerCase().includes(q))
+                      );
+                    })
+                    .map(session => (
                     <div 
                       key={session.id}
-                      className={`group relative p-3 rounded-lg cursor-pointer hover:bg-[#d5e8d4] transition-colors ${
-                        activeSessionId === session.id ? 'bg-[#d5e8d4]' : 'bg-white'
+                      className={`group relative p-3 rounded-lg cursor-pointer hover:bg-[#E3F0FA] transition-colors ${
+                        activeSessionId === session.id ? 'bg-[#E3F0FA]' : 'bg-white'
                       }`}
                     >
                       <div 
@@ -734,29 +901,31 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                 </div>
               ) : (
                 <div className="text-center py-8">
-                  <div className="w-16 h-16 bg-[#d5e8d4] rounded-full flex items-center justify-center mx-auto mb-4">
-                    <MessageSquare className="w-8 h-8 text-[#a3c9a8]" />
+                  <div className="w-16 h-16 bg-[#B3DAF7] rounded-full flex items-center justify-center mx-auto mb-4">
+                    <MessageSquare className="w-8 h-8 text-[#145DA0]" />
                   </div>
                   <p className="text-[#333333]/60 text-sm">No chat history yet</p>
                 </div>
               )}
+              <div className="flex justify-end mt-4">
+                <button
+                  onClick={clearAllChatHistory}
+                  className="flex items-center gap-1 p-2 rounded-full hover:bg-red-50 transition-colors text-red-500 border border-transparent hover:border-red-200"
+                  title="Clear All Chat History"
+                >
+                  <Trash2 className="w-5 h-5" />
+                  <span className="text-xs font-medium text-red-500 ml-1">Clear all chat history</span>
+                </button>
+              </div>
             </div>
           )}
 
           {/* Settings Tab */}
           {activeTab === 'settings' && currentView === 'main' && (
             <div className="p-6 space-y-6">
-              <h2 className="text-[#333333] text-lg font-bold">Settings</h2>
-              
+              <h2 className="text-[#145DA0] text-lg font-bold">Help</h2>
               <div className="space-y-4">
-                <div className="bg-white rounded-2xl p-4 border border-[#e0e0e0]">
-                  <h3 className="text-[#333333] font-semibold text-sm mb-2">📧 Support Contact</h3>
-                  <p className="text-[#333333]/70 text-sm mb-2">Need help? Contact our sustainability experts:</p>
-                  <a href="mailto:support@globalcleantech.com" className="text-[#a3c9a8] text-sm font-medium">
-                    support@globalcleantech.com
-                  </a>
-                </div>
-                
+                {/* About Section */}
                 <div className="bg-white rounded-2xl p-4 border border-[#e0e0e0]">
                   <h3 className="text-[#333333] font-semibold text-sm mb-2">🌱 About Global Clean Tech</h3>
                   <p className="text-[#333333]/70 text-sm">
@@ -764,35 +933,87 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                     and sustainable living guidance.
                   </p>
                 </div>
-                
+                {/* FAQ Accordion */}
                 <div className="bg-white rounded-2xl p-4 border border-[#e0e0e0]">
-                  <h3 className="text-[#333333] font-semibold text-sm mb-2">⚙️ Preferences</h3>
-                  <div className="space-y-2 text-sm">
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" defaultChecked className="rounded" />
-                      <span className="text-[#333333]/70">Energy efficiency tips</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" defaultChecked className="rounded" />
-                      <span className="text-[#333333]/70">Renewable energy updates</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" className="rounded" />
-                      <span className="text-[#333333]/70">Weekly sustainability newsletter</span>
-                    </label>
-                  </div>
+                  <h3 className="text-[#333333] font-semibold text-sm mb-3">💬 Frequently Asked Questions</h3>
+                  <FAQAccordion />
                 </div>
-
+                {/* Support Contact */}
                 <div className="bg-white rounded-2xl p-4 border border-[#e0e0e0]">
-                  <h3 className="text-[#333333] font-semibold text-sm mb-3">🗑️ Data Management</h3>
-                  <div className="space-y-2">
-                    <button
-                      onClick={clearAllChatHistory}
-                      className="w-full text-left px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg border border-red-200 transition-colors"
+                  <h3 className="text-[#333333] font-semibold text-sm mb-2">📩 Support Contact</h3>
+                  <p className="text-[#333333]/70 text-sm mb-2">Need help? Contact our sustainability experts:</p>
+                  <a href="mailto:support@globalcleantech.com" className="text-[#145DA0] text-sm font-medium">
+                    support@globalcleantech.com
+                  </a>
+                </div>
+                {/* Admin Button (subtle/hidden) */}
+                <div className="flex justify-center items-center mt-2">
+                  <button
+                    onClick={() => {
+                      setAdminView(v => !v);
+                    }}
+                    className="w-fit py-1 px-2 text-xs text-[#145DA0] opacity-30 hover:opacity-60 bg-transparent border-none shadow-none font-normal rounded transition-opacity"
+                    style={{ pointerEvents: 'auto' }}
+                  >
+                    Admin
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Admin Continents/Categories Page (only for adminView) */}
+          {adminView && (
+            <div className="p-6 space-y-6">
+              <div className="text-center">
+                <h2 className="text-[#333333] text-xl font-bold leading-tight">
+                  Welcome to <br />
+                  Global CleanTech Directory!
+                </h2>
+                <p className="text-[#333333]/70 text-sm mt-2">Your AI assistant for sustainable living and clean technology</p>
+              </div>
+              <div className="space-y-3">
+                <h3 className="text-[#145DA0] font-bold text-base">Explore by Continent:</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  {continentOptions.map((option, idx) => (
+                    <div
+                      key={idx}
+                      className="p-3 bg-white rounded-2xl border border-[#e0e0e0] flex flex-col items-center justify-center text-center"
                     >
-                      Delete ALL Chat History
-                    </button>
-                  </div>
+                      <img src={option.image} alt={option.title} className="w-16 h-16 object-contain mb-2 rounded-full border-2 border-[#145DA0] bg-white shadow-lg p-1" />
+                      <div className="text-[#145DA0] font-medium text-sm">{option.title}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="h-6"></div>
+              {/* Categories Dropdown Section */}
+              <div className="space-y-2 text-left">
+                <h3 className="text-[#145DA0] font-bold text-base">Browse by Category:</h3>
+                <div className="relative w-full max-w-[240px]">
+                  <button
+                    onClick={() => setCategoryDropdownOpen((open) => !open)}
+                    className="w-full flex justify-between items-center px-4 py-2 bg-white border border-[#E3F0FA] rounded-lg shadow-sm text-black font-medium focus:outline-none focus:ring-2 focus:ring-[#145DA0] text-sm"
+                  >
+                    {selectedCategory || 'Select a Category'}
+                    <ChevronRight className={`w-4 h-4 ml-2 transition-transform ${categoryDropdownOpen ? 'rotate-90 text-[#145DA0]' : 'text-[#B3DAF7]'}`} />
+                  </button>
+                  {categoryDropdownOpen && (
+                    <div className="absolute left-0 right-0 mt-2 bg-white border border-[#E3F0FA] rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
+                      {categories.map((cat) => (
+                        <div
+                          key={cat}
+                          onClick={() => {
+                            setSelectedCategory(cat);
+                            setCategoryDropdownOpen(false);
+                          }}
+                          className={`px-4 py-2 cursor-pointer hover:bg-[#E3F0FA] text-black text-sm ${selectedCategory === cat ? 'bg-[#E3F0FA] font-semibold' : ''}`}
+                        >
+                          {cat}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -801,18 +1022,28 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
           {/* Chat View */}
           {currentView === 'chat' && (
             <div className="flex flex-col h-full">
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6" onScroll={handleScroll}>
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6" style={{ minHeight: 0, maxHeight: '100%', overscrollBehavior: 'contain' }} onScroll={handleScroll}>
                 {messages.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-center">
-                      <div className="w-20 h-20 bg-[#d5e8d4] rounded-full flex items-center justify-center mx-auto mb-4">
-                        <span className="text-[#a3c9a8] text-3xl">🌱</span>
-                      </div>
-                      <p className="text-[#333333] text-lg font-medium">Start chatting about sustainability!</p>
-                    </div>
+                  <div className="flex flex-col items-center justify-center text-center h-full w-full">
+                    <button
+                      onClick={handleMicClick}
+                      className={`w-20 h-20 rounded-2xl flex items-center justify-center mb-5 shadow-lg transition-all duration-200 focus:outline-none border border-[#145DA0] hover:scale-105 hover:shadow-xl ${isRecording ? 'animate-pulse' : ''}`}
+                      style={isRecording
+                        ? { background: 'linear-gradient(135deg, #B3DAF7 0%, #E3F0FA 100%)' }
+                        : { background: '#B3DAF7' }}
+                      title={isRecording ? 'Stop recording' : 'Start voice message'}
+                      type="button"
+                      aria-label={isRecording ? 'Stop recording' : 'Start voice message'}
+                      disabled={isProcessingVoice}
+                    >
+                      <MicIcon className={`w-10 h-10 ${isRecording ? 'text-green-500' : ''}`} style={!isRecording ? { color: '#145DA0' } : { color: '#22c55e' }} />
+                    </button>
+                    <p className="text-xl font-semibold leading-snug tracking-tight" style={{ color: '#145DA0', lineHeight: '1.75rem', letterSpacing: '-0.01em' }}>
+                      Talk or Message to me <br />in your Language!
+                    </p>
                   </div>
                 ) : (
-                  Object.entries(messageGroups).map(([date, msgs]) => (
+                  Object.entries(messageGroups).map(([date, msgs]: [string, Message[]]) => (
                     <div key={date}>
                       <div className="text-center mb-4">
                         <span className="text-xs text-[#333333] bg-[#e0e0e0] px-3 py-1 rounded-full">
@@ -820,7 +1051,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                         </span>
                       </div>
                       <div className="space-y-3">
-                        {msgs.map((message) => (
+                        {msgs.map((message: Message) => (
                           <div
                             key={message.id}
                             className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -829,11 +1060,11 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                               <div
                                 className={`px-4 py-3 rounded-2xl ${
                                   message.sender === 'user' 
-                                    ? 'bg-[#fdf6ec] ml-auto' 
-                                    : 'bg-[#d5e8d4]'
+                                    ? 'bg-[#B3DAF7] ml-auto' 
+                                    : 'bg-[#E3F0FA]'
                                 }`}
                               >
-                                <div className="prose prose-sm text-[#333333]">
+                                <div className="prose prose-sm text-black">
                                   <ReactMarkdown>
                                     {message.text || ''}
                                   </ReactMarkdown>
@@ -862,11 +1093,11 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                                           max={message.duration || 0}
                                           value={message.currentTime || 0}
                                           onChange={(e) => handleSeek(message.id, parseFloat(e.target.value))}
-                                          className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                                          className="flex-1 h-1.5 bg-[#E3F0FA] rounded-lg appearance-none cursor-pointer custom-audio-range"
                                           style={{
-                                            background: message.duration 
-                                              ? `linear-gradient(to right, #a3c9a8 0%, #a3c9a8 ${((message.currentTime || 0) / message.duration) * 100}%, #e5e7eb ${((message.currentTime || 0) / message.duration) * 100}%, #e5e7eb 100%)`
-                                              : undefined
+                                            background: message.duration
+                                              ? `linear-gradient(to right, #3B82F6 0%, #145DA0 ${((message.currentTime || 0) / message.duration) * 100}%, #E3F0FA ${((message.currentTime || 0) / message.duration) * 100}%, #E3F0FA 100%)`
+                                              : '#E3F0FA'
                                           }}
                                         />
                                         <span className="text-xs text-gray-500 min-w-[60px] text-right">
@@ -933,7 +1164,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                 
                 {(isLoading || isProcessingVoice) && (
                   <div className="flex justify-start">
-                    <div className="bg-[#d5e8d4] px-4 py-3 rounded-2xl">
+                    <div className="bg-[#E3F0FA] px-4 py-3 rounded-2xl">
                       <div className="flex space-x-2">
                         <div className="w-2 h-2 bg-[#333333]/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
                         <div className="w-2 h-2 bg-[#333333]/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
@@ -950,10 +1181,10 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
               <div className="bg-white border-t-2 border-[#e0e0e0] px-4 py-3">
                 {(isRecording || isProcessingVoice) && (
                   <div className={`text-sm mb-2 flex items-center gap-2 justify-center ${
-                    isRecording ? 'text-red-600' : 'text-yellow-600'
+                    isRecording ? 'text-green-600' : 'text-green-600'
                   }`}>
                     <div className={`w-2 h-2 rounded-full animate-pulse ${
-                      isRecording ? 'bg-red-500' : 'bg-yellow-500'
+                      isRecording ? 'bg-green-500' : 'bg-green-500'
                     }`}></div>
                     {isRecording ? 'Recording... Click to stop' : 'Processing voice...'}
                   </div>
@@ -972,7 +1203,7 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                     className="p-2 rounded-full hover:bg-[#d5e8d4] transition-colors group"
                     title="Upload file"
                   >
-                    <Upload className="w-5 h-5 text-[#333333] group-hover:text-[#a3c9a8]" />
+                    <Upload className="w-5 h-5 text-[#333333] group-hover:text-[#145DA0]" />
                   </button>
 
                   <input
@@ -980,8 +1211,8 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyPress={handleKeyPress}
-                    placeholder="Ask about sustainability..."
-                    className="flex-1 bg-[#f5f7f4] rounded-full px-4 py-2 text-[#333333] placeholder-[#333333]/50 focus:outline-none focus:ring-2 focus:ring-[#a3c9a8]"
+                    placeholder="24/7 support in your language"
+                    className="flex-1 bg-[#f5f8fa] rounded-full px-4 py-2 text-[#145DA0] placeholder-[#145DA0]/50 focus:outline-none focus:ring-2 focus:ring-[#145DA0]"
                     disabled={isProcessingVoice}
                   />
 
@@ -990,27 +1221,27 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
                     disabled={isProcessingVoice}
                     className={`p-2 rounded-full transition-colors group ${
                       isRecording
-                        ? 'bg-red-500 hover:bg-red-600 animate-pulse text-white'
+                        ? 'bg-green-100 animate-pulse text-green-500'
                         : isProcessingVoice
-                        ? 'bg-yellow-500 cursor-not-allowed text-white'
-                        : 'hover:bg-[#d5e8d4] text-[#333333]'
+                        ? 'bg-green-100 cursor-not-allowed text-green-500'
+                        : 'hover:bg-[#B3DAF7] text-[#145DA0]'
                     }`}
                     title={isRecording ? "Stop recording" : "Voice message"}
                   >
-                    <MicIcon className="w-5 h-5 group-hover:text-[#a3c9a8]" />
+                    <MicIcon className={`w-5 h-5 ${isRecording ? 'text-green-500' : ''} group-hover:text-[#145DA0]`} />
                   </button>
 
                   <button 
                     onClick={handleSubmit}
                     disabled={!input.trim() || isLoading || isProcessingVoice}
-                    className={`p-2 rounded-full transition-colors ${
+                    className={`w-8 h-8 rounded-full transition-colors flex items-center justify-center ${
                       input.trim() && !isProcessingVoice
-                        ? 'bg-[#a3c9a8] hover:bg-[#a3c9a8]/90 text-white' 
-                        : 'bg-[#e0e0e0] text-[#333333]/50 cursor-not-allowed'
+                        ? 'bg-[#145DA0] hover:bg-[#145DA0]/90 text-white' 
+                        : 'bg-[#e0e0e0] text-[#145DA0]/50 cursor-not-allowed'
                     }`}
                     title="Send message"
                   >
-                    <Send className="w-5 h-5" />
+                    <Send className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -1022,41 +1253,88 @@ const Chatbot: React.FC<ChatbotProps> = ({ open = true, setOpen = () => {} }) =>
         <div className="bg-white border-t border-[#e0e0e0] px-6 py-2">
           <div className="flex justify-around items-center">
             <button 
-              onClick={handleHome}
-              className={`p-2 rounded-lg hover:bg-[#d5e8d4] transition-colors group ${
-                activeTab === 'home' ? 'bg-[#d5e8d4]' : ''
-              }`}
-              title="Home - Welcome & Quick Options"
+              onClick={() => {
+                createNewSession();
+                setCurrentView('chat');
+                setActiveTab('home'); // Highlight Home tab
+              }}
+              className={`flex flex-col items-center gap-1 p-2 bg-transparent ${activeTab === 'home' ? 'font-bold' : ''}`}
+              title="Home"
             >
-              <Home className={`w-5 h-5 ${
-                activeTab === 'home' ? 'text-[#a3c9a8]' : 'text-[#333333] group-hover:text-[#a3c9a8]'
-              }`} />
+              <Home className={`w-6 h-6 ${activeTab === 'home' ? 'text-[#145DA0]' : 'text-[#888888]'}`} />
+              <span className={`text-xs ${activeTab === 'home' ? 'font-bold text-[#145DA0]' : 'text-[#888888]'}`}>Home</span>
             </button>
             <button 
-              onClick={handleMessages}
-              className={`p-2 rounded-lg hover:bg-[#d5e8d4] transition-colors group ${
-                activeTab === 'messages' ? 'bg-[#d5e8d4]' : ''
-              }`}
-              title="Messages - Chat History"
+              onClick={() => {
+                setActiveTab('messages'); // Highlight Chats tab
+                setCurrentView('main'); // Show chat history
+              }}
+              className="flex flex-col items-center gap-1 p-2 bg-transparent"
+              title="Chats"
             >
-              <MessageSquare className={`w-5 h-5 ${
-                activeTab === 'messages' ? 'text-[#a3c9a8]' : 'text-[#333333] group-hover:text-[#a3c9a8]'
-              }`} />
+              <MessageSquare className={`w-6 h-6 ${activeTab === 'messages' ? 'text-[#145DA0]' : 'text-[#888888]'}`} /* No fill prop for MessageSquare, keep stroke */ />
+              <span className={`text-xs ${activeTab === 'messages' ? 'font-bold text-[#145DA0]' : 'text-[#888888]'}`}>Chats</span>
             </button>
             <button 
               onClick={handleSettings}
-              className={`p-2 rounded-lg hover:bg-[#d5e8d4] transition-colors group ${
-                activeTab === 'settings' ? 'bg-[#d5e8d4]' : ''
+              className={`p-2 rounded-lg hover:bg-[#E3F0FA] transition-colors group ${
+                activeTab === 'settings' ? 'bg-[#E3F0FA]' : ''
               }`}
-              title="Settings - Support & Preferences"
+              title="Help"
             >
-              <Settings className={`w-5 h-5 ${
-                activeTab === 'settings' ? 'text-[#a3c9a8]' : 'text-[#333333] group-hover:text-[#a3c9a8]'
-              }`} />
+              <HelpCircle className={`w-6 h-6 ${activeTab === 'settings' ? 'text-[#145DA0]' : 'text-[#888888]'}`} />
+              <span className={`text-xs ${activeTab === 'settings' ? 'font-bold text-[#145DA0]' : 'text-[#888888]'}`}>Help</span>
             </button>
           </div>
         </div>
-      </div> {/* End main container */}
+      </div>
+      {/* Custom audio progress bar thumb color */}
+      <style>
+        {`
+        .custom-audio-range::-webkit-slider-thumb {
+          background: #145DA0;
+          border: 2px solid #fff;
+          box-shadow: 0 1px 4px rgba(20,93,160,0.15);
+          border-radius: 50%;
+          width: 18px;
+          height: 18px;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        .custom-audio-range:focus::-webkit-slider-thumb {
+          outline: 2px solid #3B82F6;
+        }
+        .custom-audio-range::-moz-range-thumb {
+          background: #145DA0;
+          border: 2px solid #fff;
+          box-shadow: 0 1px 4px rgba(20,93,160,0.15);
+          border-radius: 50%;
+          width: 18px;
+          height: 18px;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        .custom-audio-range:focus::-moz-range-thumb {
+          outline: 2px solid #3B82F6;
+        }
+        .custom-audio-range::-ms-thumb {
+          background: #145DA0;
+          border: 2px solid #fff;
+          box-shadow: 0 1px 4px rgba(20,93,160,0.15);
+          border-radius: 50%;
+          width: 18px;
+          height: 18px;
+          cursor: pointer;
+          transition: background 0.2s;
+        }
+        .custom-audio-range:focus::-ms-thumb {
+          outline: 2px solid #3B82F6;
+        }
+        .custom-audio-range {
+          outline: none;
+        }
+      `}
+      </style>
     </div>
   );
 };

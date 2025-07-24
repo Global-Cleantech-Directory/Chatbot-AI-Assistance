@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 import Chatbot from './Chatbot';
 import { MessageCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import aiPhoto from '../ai-photo.png';
 
 const ChatbotWidget: React.FC = () => {
   const [open, setOpen] = useState(false);
@@ -60,7 +61,12 @@ const ChatbotWidget: React.FC = () => {
           transition={{ type: 'spring', stiffness: 300, damping: 20 }}
           className="fixed bottom-6 right-6 z-50 bg-gradient-to-br from-primary to-accent text-white rounded-2xl w-16 h-16 flex items-center justify-center shadow-2xl focus:outline-none"
         >
-          <MessageCircle size={32} strokeWidth={2.2} />
+          <img 
+            src={aiPhoto} 
+            alt="Open Chatbot" 
+            className="w-12 h-12 object-contain" 
+            aria-hidden="true" 
+          />
         </motion.button>
       )}
 
