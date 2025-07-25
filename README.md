@@ -1,9 +1,6 @@
-
-
 # GLOBAL-CLEAN-TECH-
 
 **Empowering Sustainable Solutions Through Intelligent Conversations**
-
 
 ---
 
@@ -19,7 +16,6 @@
 
 * [Overview](#overview)
 * [Getting Started](#getting-started)
-
   * [Prerequisites](#prerequisites)
   * [Installation](#installation)
   * [Usage](#usage)
@@ -71,13 +67,13 @@ Make sure you have:
 Clone the repository:
 
 ```bash
-git clone https://github.com/karanthegodd/Global-Clean-Tech-
+git clone https://github.com/Global-Cleantech-Directory/Chatbot-AI-Assistance.git
 ```
 
 Navigate to the project directory:
 
 ```bash
-cd Global-Clean-Tech-
+cd Chatbot-AI-Assistance
 ```
 
 Install dependencies:
@@ -105,5 +101,3 @@ Tests use `{test_framework}`. Run them with:
 ```bash
 npm test
 ```
-
-
